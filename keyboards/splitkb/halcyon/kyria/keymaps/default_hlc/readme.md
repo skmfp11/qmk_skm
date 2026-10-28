@@ -1,5 +1,9 @@
 # Halcyon Kyria's Default Keymap
 
+> **Branch layout note:** On `kyria_test`, `keymap.c` has three layers: QWERTY (0), Symbols (1,
+> formerly layer 4), and Adjust (2, formerly layer 6). The remaining text below documents the
+> original upstream keymap and does not describe this compact branch layout in full.
+
 ![KLE render of the default Halcyon Kyria keymap with QWERTY as the base layer. Layers are shown in sublegends.](https://i.ibb.co/RQZx2dY/default-kyria2.jpg)
 
 

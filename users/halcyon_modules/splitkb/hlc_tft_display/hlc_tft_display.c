@@ -6,31 +6,6 @@
 
 #include "hardware/structs/rosc.h"
 
-// Fonts mono2
-#include "graphics/fonts/Retron2000-27.qff.h"
-#include "graphics/fonts/Retron2000-underline-27.qff.h"
-
-// Numbers mono2
-#include "graphics/numbers/0.qgf.h"
-#include "graphics/numbers/1.qgf.h"
-#include "graphics/numbers/2.qgf.h"
-#include "graphics/numbers/3.qgf.h"
-#include "graphics/numbers/4.qgf.h"
-#include "graphics/numbers/5.qgf.h"
-#include "graphics/numbers/6.qgf.h"
-#include "graphics/numbers/7.qgf.h"
-#include "graphics/numbers/8.qgf.h"
-#include "graphics/numbers/9.qgf.h"
-#include "graphics/numbers/undef.qgf.h"
-
-static const char *caps   = "Caps";
-static const char *num    = "Num";
-static const char *scroll = "Scroll";
-
-static painter_font_handle_t  Retron27;
-static painter_font_handle_t  Retron27_underline;
-static painter_image_handle_t layer_number;
-
 static uint8_t lcd_surface_fb[SURFACE_REQUIRED_BUFFER_BYTE_SIZE(135, 240, 16)];
 
 int color_value = 0;
@@ -38,8 +13,82 @@ int color_value = 0;
 painter_device_t lcd;
 painter_device_t lcd_surface;
 
-led_t         last_led_usb_state = {0};
-layer_state_t last_layer_state   = {0};
+led_t last_led_usb_state = {0};
+
+#define ALIEN_WIDTH  11
+#define ALIEN_HEIGHT 8
+#define ALIEN_SCALE  7
+#define ALIEN_X      ((LCD_WIDTH - ALIEN_WIDTH * ALIEN_SCALE) / 2)
+#define ALIEN_Y      96
+
+static const uint16_t alien_frames[3][ALIEN_HEIGHT] = {
+    { // Quiet pose
+    0b00100000100, 0b00010001000, 0b00111111100, 0b01101110110,
+    0b11111111111, 0b10111111101, 0b10100000101, 0b00011011000,
+    },
+    { // Typing pose
+        0b00100000100, 0b10010001001, 0b10111111101, 0b11101110111,
+        0b11111111111, 0b00111111100, 0b00100000100, 0b01000000010,
+    },
+    { // Brief pose shown after changing layers
+        0b00100000100, 0b00100000100, 0b00111111100, 0b01111111110,
+        0b11011010110, 0b11111111111, 0b00110101100, 0b01100000110,
+    },
+};
+
+#define LABEL_SCALE 5
+#define LABEL_Y     8
+#define LABEL_CHAR_WIDTH (5 * LABEL_SCALE)
+#define LABEL_GAP        8
+
+static uint8_t layer_label_width(const char *label) {
+    uint8_t character_count = 0;
+    while (character_count < 3 && label[character_count]) {
+        character_count++;
+    }
+    return character_count ? character_count * LABEL_CHAR_WIDTH + (character_count - 1) * LABEL_GAP : 0;
+}
+
+static const uint8_t label_glyphs[9][7] = {
+    [0] = {0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001}, // A
+    [1] = {0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110}, // B
+    [2] = {0b01111, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b01111}, // C
+    [3] = {0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110}, // 0
+    [4] = {0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110}, // 1
+    [5] = {0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111}, // 2
+    [6] = {0b11111, 0b00010, 0b00100, 0b01110, 0b00001, 0b10001, 0b01110}, // 3
+    [7] = {0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000}, // F
+    [8] = {0b01111, 0b10000, 0b10000, 0b10111, 0b10001, 0b10001, 0b01110}, // G
+};
+
+static void draw_layer_label(const char *label, uint8_t hue, uint8_t sat, uint8_t val) {
+    uint8_t label_x = (LCD_WIDTH - layer_label_width(label)) / 2;
+    for (uint8_t character = 0; character < 3; character++) {
+        if (!label[character]) break;
+        uint8_t glyph;
+        switch (label[character]) {
+            case 'A': glyph = 0; break;
+            case 'B': glyph = 1; break;
+            case 'C': glyph = 2; break;
+            case '0': glyph = 3; break;
+            case '1': glyph = 4; break;
+            case '2': glyph = 5; break;
+            case '3': glyph = 6; break;
+            case 'F': glyph = 7; break;
+            case 'G': glyph = 8; break;
+            default: continue;
+        }
+        for (uint8_t row = 0; row < 7; row++) {
+            for (uint8_t col = 0; col < 5; col++) {
+                if (label_glyphs[glyph][row] & (1U << (4 - col))) {
+                    uint16_t x = label_x + character * (LABEL_CHAR_WIDTH + LABEL_GAP) + col * LABEL_SCALE;
+                    uint16_t y = LABEL_Y + row * LABEL_SCALE;
+                    qp_rect(lcd_surface, x, y, x + LABEL_SCALE - 1, y + LABEL_SCALE - 1, hue, sat, val, true);
+                }
+            }
+        }
+    }
+}
 
 #define GRID_WIDTH 27
 #define GRID_HEIGHT 48
@@ -178,68 +227,120 @@ void add_cell_cluster() {
     }
 }
 
-void update_display(void) {
-    static bool first_run_led   = false;
-    static bool first_run_layer = false;
+static void draw_alien(uint8_t frame, uint8_t hue, uint8_t sat, uint8_t val) {
+    uint16_t right  = ALIEN_X + ALIEN_WIDTH * ALIEN_SCALE;
+    uint16_t bottom = ALIEN_Y + ALIEN_HEIGHT * ALIEN_SCALE;
+    qp_rect(lcd_surface, ALIEN_X - 4, ALIEN_Y - 4, right + 4, bottom + 4, HSV_BLACK, true);
 
-    if (first_run_layer == false) {
-        // Load fonts
-        Retron27           = qp_load_font_mem(font_Retron2000_27);
-        Retron27_underline = qp_load_font_mem(font_Retron2000_underline_27);
+    for (uint8_t row = 0; row < ALIEN_HEIGHT; row++) {
+        for (uint8_t col = 0; col < ALIEN_WIDTH; col++) {
+            if (alien_frames[frame][row] & (1U << (ALIEN_WIDTH - 1 - col))) {
+                uint16_t x = ALIEN_X + col * ALIEN_SCALE;
+                uint16_t y = ALIEN_Y + row * ALIEN_SCALE;
+                qp_rect(lcd_surface, x, y, x + ALIEN_SCALE - 1, y + ALIEN_SCALE - 1, hue, sat, val, true);
+            }
+        }
+    }
+}
+
+static void draw_caps_lock(bool enabled) {
+    uint8_t hue = enabled ? 23 : 0;
+    uint8_t sat = enabled ? 220 : 0;
+    uint8_t val = enabled ? 255 : 110;
+    const uint8_t x = 58;
+    const uint8_t y = 198;
+
+    // Clear the whole icon first so the open shackle cannot leave colored pixels behind.
+    qp_rect(lcd_surface, x - 2, y, x + 22, y + 30, HSV_BLACK, true);
+
+    // Shackle: closed when Caps Lock is on, open otherwise.
+    qp_rect(lcd_surface, x + 3, y + 4, x + 6, y + 12, hue, sat, val, true);
+    qp_rect(lcd_surface, x + 14, y + (enabled ? 4 : 9), x + 17, y + 12, hue, sat, val, true);
+    qp_rect(lcd_surface, x + 3, y + 2, x + 17, y + 5, hue, sat, val, true);
+    if (!enabled) {
+        qp_rect(lcd_surface, x + 13, y + 2, x + 17, y + 7, HSV_BLACK, true);
     }
 
-    if (last_led_usb_state.raw != host_keyboard_led_state().raw || first_run_led == false) {
-        led_t led_usb_state = host_keyboard_led_state();
+    // Lock body and keyhole.
+    qp_rect(lcd_surface, x, y + 12, x + 20, y + 28, hue, sat, val, true);
+    qp_rect(lcd_surface, x + 9, y + 17, x + 11, y + 22, HSV_BLACK, true);
+}
 
-        led_usb_state.caps_lock ? qp_drawtext_recolor(lcd_surface, 5, LCD_HEIGHT - Retron27->line_height * 3 - 15, Retron27_underline, caps, HSV_CAPS_ON, HSV_BLACK) : qp_drawtext_recolor(lcd_surface, 5, LCD_HEIGHT - Retron27->line_height * 3 - 15, Retron27, caps, HSV_CAPS_OFF, HSV_BLACK);
-        led_usb_state.num_lock ? qp_drawtext_recolor(lcd_surface, 5, LCD_HEIGHT - Retron27->line_height * 2 - 10, Retron27_underline, num, HSV_NUM_ON, HSV_BLACK) : qp_drawtext_recolor(lcd_surface, 5, LCD_HEIGHT - Retron27->line_height * 2 - 10, Retron27, num, HSV_NUM_OFF, HSV_BLACK);
-        led_usb_state.scroll_lock ? qp_drawtext_recolor(lcd_surface, 5, LCD_HEIGHT - Retron27->line_height - 5, Retron27_underline, scroll, HSV_SCROLL_ON, HSV_BLACK) : qp_drawtext_recolor(lcd_surface, 5, LCD_HEIGHT - Retron27->line_height - 5, Retron27, scroll, HSV_SCROLL_OFF, HSV_BLACK);
+void update_display(void) {
+    static bool     first_run_led        = false;
+    static bool     first_run_layer      = false;
+    static uint8_t  last_displayed_layer = UINT8_MAX;
+    static uint8_t  last_alien_frame     = UINT8_MAX;
+    static uint32_t last_alien_animation = 0;
+    static uint32_t layer_animation_end = 0;
 
+    led_t led_usb_state = host_keyboard_led_state();
+    if (last_led_usb_state.raw != led_usb_state.raw || !first_run_led) {
+        draw_caps_lock(led_usb_state.caps_lock);
         last_led_usb_state = led_usb_state;
         first_run_led      = true;
     }
 
-    if (last_layer_state != layer_state || first_run_layer == false) {
-        switch (get_highest_layer(layer_state | default_layer_state)) {
-            case 0:
-                layer_number = qp_load_image_mem(gfx_0);
-                qp_drawimage_recolor(lcd_surface, 5, 5, layer_number, HSV_LAYER_0, HSV_BLACK);
-                break;
-            case 1:
-                layer_number = qp_load_image_mem(gfx_1);
-                qp_drawimage_recolor(lcd_surface, 5, 5, layer_number, HSV_LAYER_1, HSV_BLACK);
-                break;
-            case 2:
-                layer_number = qp_load_image_mem(gfx_2);
-                qp_drawimage_recolor(lcd_surface, 5, 5, layer_number, HSV_LAYER_2, HSV_BLACK);
-                break;
-            case 3:
-                layer_number = qp_load_image_mem(gfx_3);
-                qp_drawimage_recolor(lcd_surface, 5, 5, layer_number, HSV_LAYER_3, HSV_BLACK);
-                break;
-            case 4:
-                layer_number = qp_load_image_mem(gfx_4);
-                qp_drawimage_recolor(lcd_surface, 5, 5, layer_number, HSV_LAYER_4, HSV_BLACK);
-                break;
-            case 5:
-                layer_number = qp_load_image_mem(gfx_5);
-                qp_drawimage_recolor(lcd_surface, 5, 5, layer_number, HSV_LAYER_5, HSV_BLACK);
-                break;
-            case 6:
-                layer_number = qp_load_image_mem(gfx_6);
-                qp_drawimage_recolor(lcd_surface, 5, 5, layer_number, HSV_LAYER_6, HSV_BLACK);
-                break;
-            case 7:
-                layer_number = qp_load_image_mem(gfx_7);
-                qp_drawimage_recolor(lcd_surface, 5, 5, layer_number, HSV_LAYER_7, HSV_BLACK);
-                break;
-            default:
-                layer_number = qp_load_image_mem(gfx_undef);
-                qp_drawimage_recolor(lcd_surface, 5, 5, layer_number, HSV_LAYER_UNDEF, HSV_BLACK);
+    uint8_t active_layer = get_highest_layer(layer_state | default_layer_state);
+    // Older Vial tap-dance settings can still request the pre-compaction layer numbers.
+    if (active_layer == 4) active_layer = 1;
+    if (active_layer == 6) active_layer = 2;
+    const char *layer_name;
+    uint8_t hue, sat, val;
+    switch (active_layer) {
+        case 0:
+            layer_name = "ABC";
+            hue        = 170; // Royal blue
+            sat        = 255;
+            val        = 255;
+            break;
+        case 1:
+            layer_name = "123";
+            hue        = 213; // Vivid magenta
+            sat        = 255;
+            val        = 255;
+            break;
+        case 2:
+            layer_name = "CFG";
+            hue        = 75; // Bright lime
+            sat        = 255;
+            val        = 255;
+            break;
+        default:
+            layer_name = "CFG";
+            hue        = 75;
+            sat        = 255;
+            val        = 255;
+    }
+
+    uint32_t now = timer_read32();
+    bool had_displayed_layer = last_displayed_layer != UINT8_MAX;
+    bool layer_changed = active_layer != last_displayed_layer || !first_run_layer;
+    if (layer_changed) {
+        qp_rect(lcd_surface, 0, 0, LCD_WIDTH - 1, 50, HSV_BLACK, true);
+        draw_layer_label(layer_name, hue, sat, val);
+        last_displayed_layer = active_layer;
+        first_run_layer      = true;
+        if (had_displayed_layer) {
+            layer_animation_end = now + 700;
         }
-        qp_close_image(layer_number);
-        last_layer_state = layer_state;
-        first_run_layer  = true;
+    }
+
+    uint8_t alien_frame = 0;
+    if (layer_animation_end && (int32_t)(layer_animation_end - now) > 0) {
+        alien_frame = 2;
+    } else if (last_input_activity_elapsed() < 1200) {
+        if (timer_elapsed32(last_alien_animation) >= 350) {
+            alien_frame = last_alien_frame == 1 ? 0 : 1;
+            last_alien_animation = now;
+        } else if (last_alien_frame <= 1) {
+            alien_frame = last_alien_frame;
+        }
+    }
+
+    if (alien_frame != last_alien_frame || layer_changed) {
+        draw_alien(alien_frame, hue, sat, val);
+        last_alien_frame = alien_frame;
     }
 }
 
