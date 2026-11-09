@@ -15,80 +15,11 @@ painter_device_t lcd_surface;
 
 led_t last_led_usb_state = {0};
 
-#define ALIEN_WIDTH  11
-#define ALIEN_HEIGHT 8
-#define ALIEN_SCALE  7
-#define ALIEN_X      ((LCD_WIDTH - ALIEN_WIDTH * ALIEN_SCALE) / 2)
-#define ALIEN_Y      96
-
-static const uint16_t alien_frames[3][ALIEN_HEIGHT] = {
-    { // Quiet pose
-    0b00100000100, 0b00010001000, 0b00111111100, 0b01101110110,
-    0b11111111111, 0b10111111101, 0b10100000101, 0b00011011000,
-    },
-    { // Typing pose
-        0b00100000100, 0b10010001001, 0b10111111101, 0b11101110111,
-        0b11111111111, 0b00111111100, 0b00100000100, 0b01000000010,
-    },
-    { // Brief pose shown after changing layers
-        0b00100000100, 0b00100000100, 0b00111111100, 0b01111111110,
-        0b11011010110, 0b11111111111, 0b00110101100, 0b01100000110,
-    },
-};
-
-#define LABEL_SCALE 5
-#define LABEL_Y     8
-#define LABEL_CHAR_WIDTH (5 * LABEL_SCALE)
-#define LABEL_GAP        8
-
-static uint8_t layer_label_width(const char *label) {
-    uint8_t character_count = 0;
-    while (character_count < 3 && label[character_count]) {
-        character_count++;
-    }
-    return character_count ? character_count * LABEL_CHAR_WIDTH + (character_count - 1) * LABEL_GAP : 0;
-}
-
-static const uint8_t label_glyphs[9][7] = {
-    [0] = {0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001}, // A
-    [1] = {0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110}, // B
-    [2] = {0b01111, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b01111}, // C
-    [3] = {0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110}, // 0
-    [4] = {0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110}, // 1
-    [5] = {0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111}, // 2
-    [6] = {0b11111, 0b00010, 0b00100, 0b01110, 0b00001, 0b10001, 0b01110}, // 3
-    [7] = {0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000}, // F
-    [8] = {0b01111, 0b10000, 0b10000, 0b10111, 0b10001, 0b10001, 0b01110}, // G
-};
-
-static void draw_layer_label(const char *label, uint8_t hue, uint8_t sat, uint8_t val) {
-    uint8_t label_x = (LCD_WIDTH - layer_label_width(label)) / 2;
-    for (uint8_t character = 0; character < 3; character++) {
-        if (!label[character]) break;
-        uint8_t glyph;
-        switch (label[character]) {
-            case 'A': glyph = 0; break;
-            case 'B': glyph = 1; break;
-            case 'C': glyph = 2; break;
-            case '0': glyph = 3; break;
-            case '1': glyph = 4; break;
-            case '2': glyph = 5; break;
-            case '3': glyph = 6; break;
-            case 'F': glyph = 7; break;
-            case 'G': glyph = 8; break;
-            default: continue;
-        }
-        for (uint8_t row = 0; row < 7; row++) {
-            for (uint8_t col = 0; col < 5; col++) {
-                if (label_glyphs[glyph][row] & (1U << (4 - col))) {
-                    uint16_t x = label_x + character * (LABEL_CHAR_WIDTH + LABEL_GAP) + col * LABEL_SCALE;
-                    uint16_t y = LABEL_Y + row * LABEL_SCALE;
-                    qp_rect(lcd_surface, x, y, x + LABEL_SCALE - 1, y + LABEL_SCALE - 1, hue, sat, val, true);
-                }
-            }
-        }
-    }
-}
+#define CANVAS_WIDTH  100
+#define CANVAS_HEIGHT 200
+#define CANVAS_SCALE  108
+#define CANVAS_X      ((LCD_WIDTH - CANVAS_SCALE) / 2)
+#define CANVAS_Y      (((LCD_HEIGHT - CANVAS_SCALE * 2) / 2) - 13)
 
 #define GRID_WIDTH 27
 #define GRID_HEIGHT 48
@@ -227,120 +158,192 @@ void add_cell_cluster() {
     }
 }
 
-static void draw_alien(uint8_t frame, uint8_t hue, uint8_t sat, uint8_t val) {
-    uint16_t right  = ALIEN_X + ALIEN_WIDTH * ALIEN_SCALE;
-    uint16_t bottom = ALIEN_Y + ALIEN_HEIGHT * ALIEN_SCALE;
-    qp_rect(lcd_surface, ALIEN_X - 4, ALIEN_Y - 4, right + 4, bottom + 4, HSV_BLACK, true);
-
-    for (uint8_t row = 0; row < ALIEN_HEIGHT; row++) {
-        for (uint8_t col = 0; col < ALIEN_WIDTH; col++) {
-            if (alien_frames[frame][row] & (1U << (ALIEN_WIDTH - 1 - col))) {
-                uint16_t x = ALIEN_X + col * ALIEN_SCALE;
-                uint16_t y = ALIEN_Y + row * ALIEN_SCALE;
-                qp_rect(lcd_surface, x, y, x + ALIEN_SCALE - 1, y + ALIEN_SCALE - 1, hue, sat, val, true);
-            }
-        }
-    }
+static void draw_canvas_rect(int16_t x, int16_t y, uint8_t width, uint8_t height, uint8_t hue, uint8_t sat, uint8_t val) {
+    int16_t x0 = CANVAS_X + x * CANVAS_SCALE / CANVAS_WIDTH;
+    int16_t x1 = CANVAS_X + (x + width) * CANVAS_SCALE / CANVAS_WIDTH - 1;
+    int16_t y0 = CANVAS_Y + y * CANVAS_SCALE / CANVAS_WIDTH;
+    int16_t y1 = CANVAS_Y + (y + height) * CANVAS_SCALE / CANVAS_WIDTH - 1;
+    if (x1 < 0 || y1 < 0 || x0 >= LCD_WIDTH || y0 >= LCD_HEIGHT) return;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x0 >= LCD_WIDTH) x0 = LCD_WIDTH - 1;
+    if (y0 >= LCD_HEIGHT) y0 = LCD_HEIGHT - 1;
+    if (x1 < 0) x1 = 0;
+    if (y1 < 0) y1 = 0;
+    if (x1 >= LCD_WIDTH) x1 = LCD_WIDTH - 1;
+    if (y1 >= LCD_HEIGHT) y1 = LCD_HEIGHT - 1;
+    qp_rect(lcd_surface, x0, y0, x1, y1, hue, sat, val, true);
 }
 
-static void draw_caps_lock(bool enabled) {
-    uint8_t hue = enabled ? 23 : 0;
-    uint8_t sat = enabled ? 220 : 0;
-    uint8_t val = enabled ? 255 : 110;
-    const uint8_t x = 58;
-    const uint8_t y = 198;
+static void draw_pixel_bubble(int16_t x, int16_t y, uint8_t radius) {
+    static const uint8_t widths_r4[9] = {3, 7, 9, 9, 9, 9, 9, 7, 3};
+    static const uint8_t widths_r5[11] = {3, 7, 9, 11, 11, 11, 11, 11, 9, 7, 3};
+    static const uint8_t widths_r6[13] = {3, 7, 9, 11, 13, 13, 13, 13, 13, 11, 9, 7, 3};
+    const uint8_t *widths = radius == 4 ? widths_r4 : (radius == 5 ? widths_r5 : widths_r6);
+    x = x < radius + 2 ? radius + 2 : x;
+    x = x > CANVAS_WIDTH - radius - 2 ? CANVAS_WIDTH - radius - 2 : x;
 
-    // Clear the whole icon first so the open shackle cannot leave colored pixels behind.
-    qp_rect(lcd_surface, x - 2, y, x + 22, y + 30, HSV_BLACK, true);
-
-    // Shackle: closed when Caps Lock is on, open otherwise.
-    qp_rect(lcd_surface, x + 3, y + 4, x + 6, y + 12, hue, sat, val, true);
-    qp_rect(lcd_surface, x + 14, y + (enabled ? 4 : 9), x + 17, y + 12, hue, sat, val, true);
-    qp_rect(lcd_surface, x + 3, y + 2, x + 17, y + 5, hue, sat, val, true);
-    if (!enabled) {
-        qp_rect(lcd_surface, x + 13, y + 2, x + 17, y + 7, HSV_BLACK, true);
+    for (int8_t row = -(int8_t)radius; row <= (int8_t)radius; row++) {
+        uint8_t width = widths[row + radius];
+        int16_t left = x - width / 2;
+        draw_canvas_rect(left, y + row, width, 1, 0, 0, 105); // Soft white rim
+        if (width > 3) {
+            uint8_t inner_width = width - 2;
+            draw_canvas_rect(left + 1, y + row, inner_width, 1, 155, 120, 62); // Water-dark center
+        }
     }
 
-    // Lock body and keyhole.
-    qp_rect(lcd_surface, x, y + 12, x + 20, y + 28, hue, sat, val, true);
-    qp_rect(lcd_surface, x + 9, y + 17, x + 11, y + 22, HSV_BLACK, true);
+    draw_canvas_rect(x - 2, y - 2, 2, 2, 0, 0, 255); // Upper-left glint
+}
+
+static void draw_axolotl(uint8_t phase, uint8_t hue, uint8_t sat, uint8_t val, bool caps_lock, bool typing) {
+    static const int8_t wave[16] = {0, 6, 11, 14, 15, 14, 11, 6, 0, -6, -11, -14, -15, -14, -11, -6};
+    int8_t head = wave[phase & 15] * 3 / 30;
+    int8_t body = wave[(phase + 4) & 15] * 5 / 30;
+    int8_t tail = wave[(phase + 8) & 15] * 8 / 30;
+    // HTML palette mapped onto each active layer: base P, shadow S, gills G, cheeks M.
+    uint8_t fill_hue = hue + 8;
+    uint8_t gill_hue = hue;
+    uint8_t shade_hue = hue;
+    uint8_t cheek_hue = hue + 12;
+    uint8_t fill_sat = sat / 2;
+    uint8_t shade_sat = sat;
+    uint8_t gill_sat = sat;
+    uint8_t cheek_sat = sat;
+    uint8_t fill_val = val;
+    uint8_t shade_val = val > 28 ? val - 28 : val;
+    uint8_t gill_val = val;
+    uint8_t cheek_val = val;
+    qp_rect(lcd_surface, 0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1, HSV_BLACK, true);
+
+    // Keep the layer-colored edge; bubbles rise only during recent typing.
+    qp_rect(lcd_surface, 0, 0, LCD_WIDTH - 1, 3, hue, sat, 85, true);
+    qp_rect(lcd_surface, 0, LCD_HEIGHT - 4, LCD_WIDTH - 1, LCD_HEIGHT - 1, hue, sat, 85, true);
+    qp_rect(lcd_surface, 0, 4, 3, LCD_HEIGHT - 5, hue, sat, 85, true);
+    qp_rect(lcd_surface, LCD_WIDTH - 4, 4, LCD_WIDTH - 1, LCD_HEIGHT - 5, hue, sat, 85, true);
+    if (typing) {
+        int16_t b1x = 25 + wave[phase & 15] * 15 / 15;
+        int16_t b2x = 75 + wave[(phase + 5) & 15] * 20 / 15;
+        int16_t b3x = 50 + wave[(phase + 10) & 15] * 25 / 15;
+        int16_t b1y = 230 - (phase * 5) % 250;
+        int16_t b2y = 230 - (phase * 7 + 80) % 250;
+        int16_t b3y = 230 - (phase * 4 + 160) % 250;
+        draw_pixel_bubble(b1x, b1y, 5);
+        draw_pixel_bubble(b2x, b2y, 4);
+        draw_pixel_bubble(b3x, b3y, 6);
+    }
+
+    // Fluffy mirrored gills.
+    draw_canvas_rect(18 + head, 45, 12, 5, gill_hue, gill_sat, gill_val); draw_canvas_rect(15 + head, 47, 7, 4, gill_hue, gill_sat, gill_val);
+    draw_canvas_rect(15 + head, 55, 18, 6, gill_hue, gill_sat, gill_val); draw_canvas_rect(8 + head, 57, 9, 4, gill_hue, gill_sat, gill_val);
+    draw_canvas_rect(19 + head, 67, 11, 5, gill_hue, gill_sat, gill_val); draw_canvas_rect(16 + head, 69, 7, 4, gill_hue, gill_sat, gill_val);
+    draw_canvas_rect(70 + head, 45, 12, 5, gill_hue, gill_sat, gill_val); draw_canvas_rect(78 + head, 47, 7, 4, gill_hue, gill_sat, gill_val);
+    draw_canvas_rect(71 + head, 55, 18, 6, gill_hue, gill_sat, gill_val); draw_canvas_rect(83 + head, 57, 9, 4, gill_hue, gill_sat, gill_val);
+    draw_canvas_rect(70 + head, 67, 11, 5, gill_hue, gill_sat, gill_val); draw_canvas_rect(77 + head, 69, 7, 4, gill_hue, gill_sat, gill_val);
+
+    // Rounded head, shaded rim, and layer-colored face.
+    draw_canvas_rect(35 + head, 41, 30, 42, shade_hue, shade_sat, shade_val);
+    draw_canvas_rect(32 + head, 43, 36, 38, shade_hue, shade_sat, shade_val);
+    draw_canvas_rect(29 + head, 46, 42, 32, shade_hue, shade_sat, shade_val);
+    draw_canvas_rect(27 + head, 50, 46, 24, shade_hue, shade_sat, shade_val);
+    draw_canvas_rect(36 + head, 42, 28, 40, fill_hue, fill_sat, fill_val);
+    draw_canvas_rect(33 + head, 44, 34, 36, fill_hue, fill_sat, fill_val);
+    draw_canvas_rect(30 + head, 47, 40, 30, fill_hue, fill_sat, fill_val);
+    draw_canvas_rect(28 + head, 51, 44, 22, fill_hue, fill_sat, fill_val);
+
+    draw_canvas_rect(38 + head, 57, 4, 5, 0, 0, 0);
+    draw_canvas_rect(58 + head, 57, 4, 5, 0, 0, 0);
+    if (caps_lock) {
+        draw_canvas_rect(38 + head, 57, 2, 2, 0, 0, 255);
+        draw_canvas_rect(58 + head, 57, 2, 2, 0, 0, 255);
+    }
+    draw_canvas_rect(33 + head, 63, 5, 3, cheek_hue, cheek_sat, cheek_val);
+    draw_canvas_rect(62 + head, 63, 5, 3, cheek_hue, cheek_sat, cheek_val);
+    draw_canvas_rect(48 + head, 64, 4, 1, cheek_hue, cheek_sat, cheek_val);
+    draw_canvas_rect(47 + head, 63, 1, 1, cheek_hue, cheek_sat, cheek_val);
+    draw_canvas_rect(52 + head, 63, 1, 1, cheek_hue, cheek_sat, cheek_val);
+
+    // Rounded body and four legs follow the middle wave.
+    draw_canvas_rect(40 + body, 83, 20, 4, shade_hue, shade_sat, shade_val);
+    draw_canvas_rect(41 + body, 83, 18, 4, fill_hue, fill_sat, fill_val);
+    draw_canvas_rect(37 + body, 87, 26, 12, shade_hue, shade_sat, shade_val);
+    draw_canvas_rect(36 + body, 91, 28, 20, shade_hue, shade_sat, shade_val);
+    draw_canvas_rect(38 + body, 87, 24, 12, fill_hue, fill_sat, fill_val);
+    draw_canvas_rect(37 + body, 90, 26, 20, fill_hue, fill_sat, fill_val);
+    draw_canvas_rect(44 + body, 94, 12, 12, 0, 0, 255);
+    draw_canvas_rect(31 + body, 93, 6, 5, hue, sat, val);
+    draw_canvas_rect(63 + body, 93, 6, 5, hue, sat, val);
+    draw_canvas_rect(32 + body, 107, 6, 5, hue, sat, val);
+    draw_canvas_rect(62 + body, 107, 6, 5, hue, sat, val);
+
+    // The narrow tail swings with a larger, delayed wave.
+    draw_canvas_rect(40 + tail, 111, 20, 15, shade_hue, shade_sat, shade_val);
+    draw_canvas_rect(41 + tail, 111, 18, 14, fill_hue, fill_sat, fill_val);
+    draw_canvas_rect(43 + tail * 11 / 10, 126, 14, 25, shade_hue, shade_sat, shade_val);
+    draw_canvas_rect(44 + tail * 11 / 10, 126, 12, 24, fill_hue, fill_sat, fill_val);
+    draw_canvas_rect(46 + tail * 13 / 10, 151, 8, 25, shade_hue, shade_sat, shade_val);
+    draw_canvas_rect(47 + tail * 13 / 10, 151, 6, 24, fill_hue, fill_sat, fill_val);
+    draw_canvas_rect(48 + tail * 15 / 10, 176, 4, 15, shade_hue, shade_sat, shade_val);
+    draw_canvas_rect(49 + tail * 15 / 10, 176, 2, 14, fill_hue, fill_sat, fill_val);
 }
 
 void update_display(void) {
-    static bool     first_run_led        = false;
     static bool     first_run_layer      = false;
     static uint8_t  last_displayed_layer = UINT8_MAX;
-    static uint8_t  last_alien_frame     = UINT8_MAX;
-    static uint32_t last_alien_animation = 0;
-    static uint32_t layer_animation_end = 0;
+    static uint8_t  swim_phase            = 0;
+    static uint32_t last_swim_frame       = 0;
+    static bool     last_typing           = false;
+    static bool     last_caps_lock       = false;
+    static uint8_t  last_hue             = UINT8_MAX;
 
     led_t led_usb_state = host_keyboard_led_state();
-    if (last_led_usb_state.raw != led_usb_state.raw || !first_run_led) {
-        draw_caps_lock(led_usb_state.caps_lock);
-        last_led_usb_state = led_usb_state;
-        first_run_led      = true;
-    }
+    bool caps_changed = last_led_usb_state.raw != led_usb_state.raw;
+    last_led_usb_state = led_usb_state;
 
     uint8_t active_layer = get_highest_layer(layer_state | default_layer_state);
     // Older Vial tap-dance settings can still request the pre-compaction layer numbers.
     if (active_layer == 4) active_layer = 1;
     if (active_layer == 6) active_layer = 2;
-    const char *layer_name;
     uint8_t hue, sat, val;
     switch (active_layer) {
         case 0:
-            layer_name = "ABC";
-            hue        = 170; // Royal blue
+            hue        = 235; // Soft pink
             sat        = 255;
             val        = 255;
             break;
         case 1:
-            layer_name = "123";
-            hue        = 213; // Vivid magenta
+            hue        = 150; // Blue
             sat        = 255;
             val        = 255;
             break;
         case 2:
-            layer_name = "CFG";
-            hue        = 75; // Bright lime
-            sat        = 255;
-            val        = 255;
+            hue        = 0; // Neutral gray
+            sat        = 0;
+            val        = 185;
             break;
         default:
-            layer_name = "CFG";
-            hue        = 75;
-            sat        = 255;
-            val        = 255;
+            hue        = 0;
+            sat        = 0;
+            val        = 185;
     }
 
     uint32_t now = timer_read32();
-    bool had_displayed_layer = last_displayed_layer != UINT8_MAX;
+    bool typing = last_input_activity_elapsed() < 1200;
     bool layer_changed = active_layer != last_displayed_layer || !first_run_layer;
-    if (layer_changed) {
-        qp_rect(lcd_surface, 0, 0, LCD_WIDTH - 1, 50, HSV_BLACK, true);
-        draw_layer_label(layer_name, hue, sat, val);
+    bool redraw = layer_changed || caps_changed || led_usb_state.caps_lock != last_caps_lock || hue != last_hue || typing != last_typing;
+    if (timer_elapsed32(last_swim_frame) >= 100) {
+        swim_phase++;
+        last_swim_frame = now;
+        redraw = true;
+    }
+
+    if (redraw) {
+        draw_axolotl(swim_phase, hue, sat, val, led_usb_state.caps_lock, typing);
         last_displayed_layer = active_layer;
-        first_run_layer      = true;
-        if (had_displayed_layer) {
-            layer_animation_end = now + 700;
-        }
-    }
-
-    uint8_t alien_frame = 0;
-    if (layer_animation_end && (int32_t)(layer_animation_end - now) > 0) {
-        alien_frame = 2;
-    } else if (last_input_activity_elapsed() < 1200) {
-        if (timer_elapsed32(last_alien_animation) >= 350) {
-            alien_frame = last_alien_frame == 1 ? 0 : 1;
-            last_alien_animation = now;
-        } else if (last_alien_frame <= 1) {
-            alien_frame = last_alien_frame;
-        }
-    }
-
-    if (alien_frame != last_alien_frame || layer_changed) {
-        draw_alien(alien_frame, hue, sat, val);
-        last_alien_frame = alien_frame;
+        first_run_layer = true;
+        last_typing = typing;
+        last_caps_lock = led_usb_state.caps_lock;
+        last_hue = hue;
     }
 }
 
